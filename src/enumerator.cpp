@@ -12,12 +12,25 @@ using namespace std;
 #define SHORT_SIZE 65536
 #define MAX_SHORT 0xffff
 
+/*A struct representing a Halin tripole (palette)*/
 struct halin_tripole {
-    string expr;
-    unsigned short bit_map[16] = {};
+    /**
+     * The "name", obtained as '(' + name_of_the_left_sub + ')' + name_of_the_right (root vertex of degree 3) or
+     *                         '<' + name_of_the_subtripole + '>' (root vertex of degree 2)
+     */
+    string expr;  
+    //Binary representation of the matrix
+    unsigned short bit_map[16] = {};    
+    /**
+     * Precomputed recolorations for each case
+     */
     unsigned short sub2_perms[16] = {};
     unsigned short sub3_perms2[16] = {};
     unsigned short sub3_perms3[16] = {};
+    /**
+     * All the possible combinations how this palette can be obtained. (The name only describes the first such option)
+     */
+    vector<halin_tripole*> parents = {};
 };
 
 unsigned short connection_mapping[SHORT_SIZE];
@@ -26,8 +39,15 @@ unsigned short extendable_pallete_bit_map[16] = {};
 unsigned short extendable_pallete_bit_map_avd_2[16] = {};
 unsigned short extendable_pallete_bit_map_savd_2[16] = {};
 
+/*List of all necessary permutations from S_4*/
 uint8_t all_perms[12][4] = {{2,0,1,3}, {2,0,3,1}, {2,1,0,3}, {2,1,3,0}, {2,3,0,1}, {2,3,1,0},
                             {3,0,1,2}, {3,0,2,1}, {3,1,0,2}, {3,1,2,0}, {3,2,0,1}, {3,2,1,0}};
+
+
+/**
+ * Precomputed function for recoloration and pairing with respect to all colorings and root vertex degrees. 
+ */
+
 unsigned short perm_mappings[12][SHORT_SIZE] = {};
 uint8_t perm_bucket_mappings[12][16] = {};
 
@@ -101,7 +121,7 @@ uint8_t (*avd_3_sub3_perm3_bucket_mappings[4])[16] = {&(perm_bucket_mappings[6])
                                                       &(perm_bucket_mappings[10]),
                                                       &(perm_bucket_mappings[11])};
 
-/**S-AVD */
+/**SND */
 //DEGREE 2-cases
 unsigned short (*savd_2_sub2_perm_mappings[4])[SHORT_SIZE] = {&(perm_mappings[6]), &(perm_mappings[7]), &(perm_mappings[8]), &(perm_mappings[10])};
 uint8_t (*savd_2_sub2_perm_bucket_mappings[4])[16] = {&(perm_bucket_mappings[6]), &(perm_bucket_mappings[7]), &(perm_bucket_mappings[8]), &(perm_bucket_mappings[10])};
@@ -135,6 +155,7 @@ uint8_t (*savd_3_sub3_perm3_bucket_mappings[4])[16] = {&(perm_bucket_mappings[6]
                                                       &(perm_bucket_mappings[10]),
                                                       &(perm_bucket_mappings[11])};
 
+/*a function that fills in the arrays with precomputed function outputs using functions from enumerator_premapper.cpp*/
 void prepare_mappings() {
     produce_connection_mapping(connection_mapping);
     produce_full_bit_map(full_bit_map);
@@ -314,6 +335,8 @@ void add_permutations_total(halin_tripole& tripole, int tripole_deg, uint16_t fl
     }
 }
 
+/*Function returning a new halin_tripole (palette) with root degree 3. The flags are passed to determine 
+    as to with respect to which coloring should it be created*/
 halin_tripole produce_deg3_total(halin_tripole& left, halin_tripole& right, uint16_t flags) {
     halin_tripole tripole = halin_tripole();
     tripole.expr = "(" + left.expr + ")" + right.expr;
@@ -324,6 +347,7 @@ halin_tripole produce_deg3_total(halin_tripole& left, halin_tripole& right, uint
     return tripole;
 }
 
+/*Similar function for a halin_tripole (palette) with root degree 2*/
 halin_tripole produce_deg2_total(halin_tripole& sub_tripole, uint16_t flags) {
     halin_tripole tripole = halin_tripole();
     tripole.expr = "<" + sub_tripole.expr + ">";
@@ -336,6 +360,7 @@ halin_tripole produce_deg2_total(halin_tripole& sub_tripole, uint16_t flags) {
     return tripole;
 }
 
+/*Function that returns the palette and desrciption of the trivial tripole (single vertex)*/
 halin_tripole create_t0_tripole(uint16_t flags) {
     halin_tripole tripole = halin_tripole();
     tripole.expr = "";
@@ -345,8 +370,14 @@ halin_tripole create_t0_tripole(uint16_t flags) {
     return tripole;
 }
 
+/**
+ * To verify whether a palette was already encountered, we simply use a two dimensional map.
+ * The first 128 vectors are the key to the first map, the second 128 bits are used as the key for the nested map.
+ * The nested map then references the Halin tripole (if it exists) that was encountered previously.
+ */
 vector<vector<halin_tripole>> global_result({});
-unordered_map<__int128_t, unordered_map<__int128_t, vector<string>>> global_map;
+unordered_map<__int128_t, unordered_map<__int128_t, halin_tripole*>> global_map;
+unordered_map<__int128_t, unordered_set<__int128_t>> global_set;
 
 ostream& operator<<(ostream& o, const __int128& x) {
     if (x == numeric_limits<__int128_t>::min()) return o << "nonsense";
@@ -358,37 +389,57 @@ ostream& operator<<(ostream& o, const __int128& x) {
 /**
  * returns true if bits is a new pallet, false otherwise
  */
-bool map_check_and_add(unsigned short (&bits)[16], string& left, string& right) {
+bool map_check_and_add(halin_tripole* new_tripole, halin_tripole* left, halin_tripole* right) {
+    unsigned short (&bits)[16] = new_tripole->bit_map;
     __int128_t& key = ((__int128_t*) bits)[0];
     __int128_t& value = ((__int128_t*) bits)[1];
-    unordered_map<__int128_t, unordered_map<__int128_t, vector<string>>>::iterator it = global_map.find(key);
+    unordered_map<__int128_t, unordered_set<__int128_t>>::iterator set_iterator = global_set.find(key);
+
     bool result = false;
+
+    unordered_map<__int128_t, unordered_map<__int128_t, halin_tripole*>>::iterator it = global_map.find(key);
     if (it == global_map.end()) { // no such key in map
-        unordered_map<__int128_t, vector<string>>  value_map;
-        value_map[value] = {left, right};
-        global_map[key] = {value_map};
-        result = true;
-    } else {
-        unordered_map<__int128_t, vector<string>>& value_map = global_map[key];
-        if (value_map.find(value) == value_map.end()) { // no such value in the value set
-            value_map[value] = {left, right};
-            result = true;
-        } else {
-            value_map[value].push_back(left);
-            value_map[value].push_back(right);
-        }
+        global_map[key] = {};
     }
 
-    return result;
+    unordered_map<__int128_t, halin_tripole*>& value_map = global_map.at(key);
+    if (value_map.find(value) == value_map.end()) { // no such value in the value set
+        new_tripole->parents.push_back(left);
+        new_tripole->parents.push_back(right);
+        value_map[value] = new_tripole;
+
+        return true;
+    } else {
+        halin_tripole* old_tripole = value_map.at(value);
+        old_tripole->parents.push_back(left);
+        old_tripole->parents.push_back(right);
+        return false;
+    }
+
+
+    // if (set_iterator == global_set.end()) { // no such key in map
+    //     global_set[key] = {value};
+    //     result = true;
+    // } else {
+    //     unordered_set<__int128_t>& value_set = global_set[key];
+    //     if (value_set.find(value) == value_set.end()) { // no such value in the value set
+    //         value_set.insert(value);
+    //         result = true;
+    //     }
+    // }
 }
+
+/**
+ * Some usefull global map operations
+ * */
 
 int map_get_count(unsigned short (&bits)[16]) {
     __int128_t& key = ((__int128_t*) bits)[0];
     __int128_t& value = ((__int128_t*) bits)[1];
     if (global_map.find(key) != global_map.end()) {
-        unordered_map<__int128_t, vector<string>>& value_map = global_map[key];
+        unordered_map<__int128_t, halin_tripole*>& value_map = global_map[key];
         if (value_map.find(value) != value_map.end()) {
-            return value_map[value].size() / 2;
+            return value_map[value]->parents.size() / 2;
         }
     }
     return 0;
@@ -398,14 +449,21 @@ vector<string> map_get_vector(unsigned short (&bits)[16]) {
     __int128_t& key = ((__int128_t*) bits)[0];
     __int128_t& value = ((__int128_t*) bits)[1];
     if (global_map.find(key) != global_map.end()) {
-        unordered_map<__int128_t, vector<string>>& value_map = global_map[key];
+        unordered_map<__int128_t, halin_tripole*>& value_map = global_map[key];
         if (value_map.find(value) != value_map.end()) {
-            return value_map[value];
+            vector<string> result = {};
+            for (halin_tripole* tripole : value_map[value]->parents) {
+                result.push_back(tripole->expr);
+            }
+            return result;
         }
     }
     return {};
 }
 
+halin_tripole fictional;
+
+/*The main recursive function.*/
 void generate_sub(int tier, int const depth, uint16_t flags) {
     vector<halin_tripole> new_tier = {};
     global_result.push_back(new_tier);
@@ -417,7 +475,7 @@ void generate_sub(int tier, int const depth, uint16_t flags) {
             for (halin_tripole& right_tripole : right_trees) {
                 halin_tripole result = produce_deg3_total(left_tripole, right_tripole, flags);
                 if (flags & flag_u) {
-                    bool check_result = map_check_and_add(result.bit_map, left_tripole.expr, right_tripole.expr);
+                    bool check_result = map_check_and_add(&result, &left_tripole, &right_tripole);
                     if (check_result) {
                         global_result.at(tier).push_back(result);
                     }
@@ -434,7 +492,7 @@ void generate_sub(int tier, int const depth, uint16_t flags) {
             halin_tripole result = produce_deg2_total(sub_tripole, flags);
             if (flags & flag_u) {
                 string str = "%";
-                bool check_result = map_check_and_add(result.bit_map, sub_tripole.expr, str);
+                bool check_result = map_check_and_add(&result, &sub_tripole, &fictional);
                 if (check_result) {
                     global_result.at(tier).push_back(result);
                 }
@@ -449,18 +507,20 @@ void generate_sub(int tier, int const depth, uint16_t flags) {
     }
 }
 
+/*Root of the recursion*/
 void generate(int const depth, uint16_t flags) {
     halin_tripole tripole = create_t0_tripole(flags);
     global_result.push_back({tripole});
 
     if (flags & flag_u) {
         string str = "void";
-        map_check_and_add(tripole.bit_map, str, str);
+        map_check_and_add(&tripole, &fictional, &fictional);
     }
 
     generate_sub(1, depth, flags);
 }
 
+/*Prints one tripole based on the flags in the input.*/
 void fprint_tripole(halin_tripole& tripole, FILE* fp, uint16_t print_flags) {
     if (print_flags & flag_P) {
         fprintf(fp, "=");
@@ -471,7 +531,7 @@ void fprint_tripole(halin_tripole& tripole, FILE* fp, uint16_t print_flags) {
     }
 
     if (print_flags & flag_p) {
-        fprintf(fp, " %u", map_get_count(tripole.bit_map));
+        fprintf(fp, " %lu", tripole.parents.size());
     }
     
     fprintf(fp, "\n");
@@ -493,10 +553,15 @@ void fprint_tripole(halin_tripole& tripole, FILE* fp, uint16_t print_flags) {
     }
 }
 
+/*Filters out the graphs for print_output(..) based on the flags from input.*/
 bool print_filter(halin_tripole& tripole, uint16_t flags) {
     if (flags & flag_N) {
         if (flags & flag_a) {
-            if (tripole.expr.at(0) = '(') {
+            if (tripole.expr.empty()) {
+                for (int i = 0; i < 16; i++) {
+                    if (tripole.bit_map[i] & extendable_pallete_bit_map[i]) return false;
+                }
+            } else if (tripole.expr.at(0) = '(') {
                 for (int i = 0; i < 16; i++) {
                     if (tripole.bit_map[i] & extendable_pallete_bit_map[i]) return false;
                 }
@@ -506,7 +571,11 @@ bool print_filter(halin_tripole& tripole, uint16_t flags) {
                 }
             }
         } else if (flags & flag_A) {
-            if (tripole.expr.at(0) = '(') {
+            if (tripole.expr.empty()) {
+                for (int i = 0; i < 16; i++) {
+                    if (tripole.bit_map[i] & extendable_pallete_bit_map[i]) return false;
+                }
+            } else if (tripole.expr.at(0) = '(') {
                 for (int i = 0; i < 16; i++) {
                     if (tripole.bit_map[i] & extendable_pallete_bit_map[i]) return false;
                 }
@@ -527,41 +596,59 @@ bool print_filter(halin_tripole& tripole, uint16_t flags) {
     return true;
 }
 
+/*Prints the outputs based on the flags it was called with*/
 void print_output(FILE* fp, uint16_t flags) {
+
+    perror("I only got here\n");
+    vector<vector<halin_tripole*>> filtered;
+    for (int i = 0; i < global_result.size(); i++) {
+        vector<halin_tripole>& tier = global_result.at(i);
+        vector<halin_tripole*> filtered_tier = {};
+        for (halin_tripole& tripole : tier) {
+            if (print_filter(tripole, flags)) {
+                filtered_tier.push_back(&tripole);
+            }
+        }
+        filtered.push_back(filtered_tier);
+    }
+
+    perror("I got here\n");
+
     if (flags & flag_r) {
-        for (int print_depth = 0; print_depth < global_result.size(); print_depth++) {
-            for (halin_tripole& current : global_result.at(print_depth)) {
-                if (print_filter(current, flags)) {
+        for (int print_depth = 0; print_depth < filtered.size(); print_depth++) {
+            for (halin_tripole* current : filtered.at(print_depth)) {
                     for (int scan_depth = 0; scan_depth < print_depth; scan_depth++) {
                         for (halin_tripole& scanned : global_result.at(scan_depth)) {
-                            if (compare_bit_vectors(current.bit_map, scanned.bit_map)) {
+                            halin_tripole& current_tripole = *current;
+                            if (compare_bit_vectors(current_tripole.bit_map, scanned.bit_map)) {
                                 fprintf(fp, "Reduction: \n");
-                                fprint_tripole(current, fp, flags);
+                                fprint_tripole(current_tripole, fp, flags);
                                 fprint_tripole(scanned, fp, flags);
                             }
                         }
                     }
-                }
             }
         }
     } else if (flags & flag_n) {
-        for (int i = 1; i < global_result.size(); i++) {
+        for (int i = 1; i < filtered.size(); i++) {
             int count = 0;
-            for (halin_tripole& tripole : global_result.at(i)) {
+            for (halin_tripole* tripole : filtered.at(i)) {
                 count++;
             }
             fprintf(fp, "%u: %u\n", i, count);
         }
     } else {
-        for (int i = 1; i < global_result.size(); i++) {
-            vector<halin_tripole>& tier = global_result.at(i);
-            for (halin_tripole& tripole : tier) {
-                if (print_filter(tripole, flags)) fprint_tripole(tripole, fp, flags);
+        for (int i = 1; i < filtered.size(); i++) {
+            vector<halin_tripole*>& tier = filtered.at(i);
+            for (halin_tripole* tripole : tier) {
+                if (print_filter(*tripole, flags)) fprint_tripole(*tripole, fp, flags);
             }
         }
     }
 }
 
+
+/*Incomplete list of tests*/
 void test_combine() {
     unsigned short test_map[16] = {0, 0x8000 >> 1, 0x8000 >> 2, 0x8000 >> 3,
                                     0x8000 >> 4, 0, 0x8000 >> 6, 0x8000 >> 7,
@@ -598,32 +685,36 @@ void test_combine_tripoles() {
     print_bit_vector_quads(t1_tripole.bit_map);
 }
 
-void test_check_and_add_map() {
-    unsigned short test_arr1[16] = {0,1,0,0,
-                                   0,0,0,0,
-                                   7,0,0,0,
-                                   0,0,0,0};
-    unsigned short test_arr2[16] = {0,1,0,0,
-                                   0,0,0,0,
-                                   6,0,0,0,
-                                   0,0,0,0};
-    unsigned short test_arr3[16] = {0,0,0,0,
-                                   0,0,0,12,
-                                   0,0,0,0,
-                                   0,0,0,7};
-    string dummy_string1 = "s1";
-    string dummy_string2 = "s2";
-    assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == true);
-    assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == false);
-    assert(map_check_and_add(test_arr2, dummy_string1, dummy_string2) == true);
-    assert(map_check_and_add(test_arr3, dummy_string1, dummy_string2) == true);
-    assert(map_check_and_add(test_arr3, dummy_string1, dummy_string2) == false);
-    assert(map_check_and_add(test_arr2, dummy_string1, dummy_string2) == false);
-    assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == true);
-    assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == false);
-}
+// void test_check_and_add_map() {
+//     unsigned short test_arr1[16] = {0,1,0,0,
+//                                    0,0,0,0,
+//                                    7,0,0,0,
+//                                    0,0,0,0};
+//     unsigned short test_arr2[16] = {0,1,0,0,
+//                                    0,0,0,0,
+//                                    6,0,0,0,
+//                                    0,0,0,0};
+//     unsigned short test_arr3[16] = {0,0,0,0,
+//                                    0,0,0,12,
+//                                    0,0,0,0,
+//                                    0,0,0,7};
+//     string dummy_string1 = "s1";
+//     string dummy_string2 = "s2";
+//     assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == true);
+//     assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == false);
+//     assert(map_check_and_add(test_arr2, dummy_string1, dummy_string2) == true);
+//     assert(map_check_and_add(test_arr3, dummy_string1, dummy_string2) == true);
+//     assert(map_check_and_add(test_arr3, dummy_string1, dummy_string2) == false);
+//     assert(map_check_and_add(test_arr2, dummy_string1, dummy_string2) == false);
+//     assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == true);
+//     assert(map_check_and_add(test_arr1, dummy_string1, dummy_string2) == false);
+// }
 
+/*The main function*/
 int main(int argc, char* argv[]) {
+    fictional = halin_tripole();
+    fictional.expr = "%";
+
     prepare_mappings();
     uint16_t flags = 0;
     string output_file_path;

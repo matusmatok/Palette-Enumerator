@@ -2,6 +2,10 @@
 
 using namespace std;
 
+/**
+ * Contains auxiliary functions, mainly for printing
+ */
+
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c\n"
 #define BYTE_TO_BINARY(byte)  \
   ((byte) & 0x80 ? '1' : '0'), \

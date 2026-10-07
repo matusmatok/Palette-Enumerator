@@ -2,6 +2,10 @@
 
 #define SHORT_SIZE 65536
 
+/**
+ * Contains functions to precompute the "functions"
+ */
+
 using namespace std;
 
 unsigned short connections[16][2] ={
